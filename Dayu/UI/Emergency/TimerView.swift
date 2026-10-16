@@ -22,6 +22,10 @@ struct TimerView: View {
             VStack(spacing: 0) {
                 Spacer(minLength: 40)
 
+                Text("还剩")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.muted)
+
                 Text(EmergencyDraft.clock(remaining))
                     .font(.system(size: 88, weight: .light, design: .rounded).monospacedDigit())
                     .contentTransition(.numericText(countsDown: true))

@@ -23,7 +23,9 @@ struct DoneView: View {
 
             Text(Copy.doneMessage(start: start, end: endIntensity))
                 .font(.title3)
+                .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 28)
                 .animation(.easeInOut, value: endIntensity)
 
