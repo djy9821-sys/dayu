@@ -57,19 +57,15 @@ Dayu/
 Tests/CoreChecks/        核心逻辑检查
 ```
 
-## 自动检查
+## 检查
 
-每次推送到 `main`，GitHub Actions 会在云端 Mac 上：
-
-1. 运行核心逻辑检查（`Tests/CoreChecks`）；
-2. 编译模拟器版（Debug）和真机版（Release）；
-3. 在模拟器里逐页截图，截图在每次运行的 **Artifacts → screenshots** 里。
-
-本地也可以跑核心检查：
+核心逻辑检查（时间、边界、7 天统计、文案禁用词），在 Mac 终端里运行：
 
 ```bash
 swiftc Dayu/Core/*.swift Tests/CoreChecks/main.swift -o /tmp/corechecks && /tmp/corechecks
 ```
+
+GitHub 上还有一个云端编译检查，只在手动触发时运行：仓库页面 → **Actions → Build → Run workflow**。
 
 开发时可以用启动参数直接打开某一页（只在 Debug 版有效，用内存里的演示数据）：
 Xcode → Product → Scheme → Edit Scheme → Run → Arguments，添加 `-uiDemo timer`。

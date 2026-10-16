@@ -1,8 +1,8 @@
 name: Build
 
+# 只在手动点击时运行（GitHub → Actions → Build → Run workflow）。
+# 日常开发直接用本机 Xcode 和模拟器；私有仓库的云端 Mac 时长有月度限额。
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
