@@ -135,6 +135,25 @@ do {
     ended.extendTimer(at: later, minutes: 10)
     expectEqual(ended.timerEndsAt, later.addingTimeInterval(600), "结束后加时从现在算")
 
+    // 提前结束：之后再进来是结束页，不是接着计时
+    var early = draft
+    let fiveMin = start.addingTimeInterval(300)
+    early.endTimer(at: fiveMin)
+    expect(!early.isTimerRunning(at: fiveMin.addingTimeInterval(1)), "提前结束后不再计时")
+    expectEqual(early.endedEarly, true, "记下提前结束")
+    expectEqual(early.elapsedTimerMinutes(at: start.addingTimeInterval(3600)), 5, "时长按提前结束的时间算")
+    var reopened = early
+    reopened.extendTimer(at: fiveMin.addingTimeInterval(60), minutes: 10)
+    expect(reopened.isTimerRunning(at: fiveMin.addingTimeInterval(120)), "提前结束后还可以再走 10 分钟")
+    expectEqual(reopened.endedEarly, nil, "再走 10 分钟后不再算提前结束")
+    var finished = draft
+    finished.endTimer(at: start.addingTimeInterval(1500))
+    expectEqual(finished.endedEarly, nil, "已经走完的计时不算提前结束")
+
+    // 旧版本存下的草稿（没有 endedEarly 字段）也能读出来
+    let legacy = #"{"startedAt":0,"timerMinutesTotal":20,"leftEnvironment":true}"#.data(using: .utf8)!
+    expect((try? JSONDecoder().decode(EmergencyDraft.self, from: legacy)) != nil, "兼容旧草稿")
+
     // 存储往返
     let data = try! JSONEncoder().encode(running)
     let decoded = try! JSONDecoder().decode(EmergencyDraft.self, from: data)

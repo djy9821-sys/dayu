@@ -13,6 +13,8 @@ struct EmergencyDraft: Codable, Equatable {
     var intensityStart: Int?
     var intensityEnd: Int?
     var notificationID: String?
+    /// 冲动下去了，提前结束了计时（可选：旧版本存下的草稿没有这个字段）
+    var endedEarly: Bool?
 
     init(startedAt: Date) {
         self.startedAt = startedAt
@@ -52,6 +54,14 @@ struct EmergencyDraft: Codable, Equatable {
         if timerStartedAt == nil { timerStartedAt = now }
         timerEndsAt = base.addingTimeInterval(TimeInterval(minutes * 60))
         timerMinutesTotal += minutes
+        endedEarly = nil
+    }
+
+    /// 提前结束：把结束时间改成现在，之后再进来会直接到结束页，而不是接着计时。
+    mutating func endTimer(at now: Date) {
+        guard let ends = timerEndsAt, ends > now else { return }
+        timerEndsAt = now
+        endedEarly = true
     }
 
     /// 计时页 mm:ss。

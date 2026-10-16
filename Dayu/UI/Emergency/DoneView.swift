@@ -7,7 +7,7 @@ struct DoneView: View {
 
     var body: some View {
         let start = flow.draft?.intensityStart
-        let finishedNaturally = !(flow.draft?.isTimerRunning(at: .now) ?? false)
+        let finishedNaturally = flow.draft?.endedEarly != true
 
         VStack(alignment: .leading, spacing: 0) {
             Spacer(minLength: 40)

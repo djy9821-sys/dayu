@@ -119,7 +119,10 @@ final class AppFlow {
     /// 冲动已经下去了，提前结束计时。
     func endTimerEarly() {
         Notifier.shared.cancel(id: draft?.notificationID)
-        updateDraft { $0.notificationID = nil }
+        updateDraft { draft in
+            draft.notificationID = nil
+            draft.endTimer(at: .now)
+        }
         TimerActivity.endAll()
         go(.done)
     }
