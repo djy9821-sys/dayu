@@ -16,9 +16,13 @@ enum FlowStep: Equatable {
     case log(LogMode)
     case stop(stage: Stage, night: Bool)
     case saved
+    case morning
+    case evening
+    case nightMode
+    case workout
 }
 
-/// 管理"我现在有冲动"和"补记"这两个全屏流程。
+/// 管理所有全屏流程：冲动、补记、晨间打卡、晚间小结、Night Mode、运动。
 @MainActor
 @Observable
 final class AppFlow {
@@ -26,7 +30,13 @@ final class AppFlow {
 
     var isPresented = false
     var step: FlowStep = .steps
+    var tab: AppTab = .today
     private(set) var draft: EmergencyDraft?
+
+    /// 补记时预填的时间（例如早上补记昨晚）
+    var backfillPreset: Date?
+    /// 记录保存后回到哪一页（例如从晨间打卡去补记，记完回到晨间打卡）
+    var afterSaved: FlowStep?
 
     init() {
         draft = DraftStore.load()
@@ -34,27 +44,54 @@ final class AppFlow {
 
     // MARK: 入口
 
-    /// 首页大按钮。如果上一次还在计时，就回到计时；时间已到，就去结束页。
-    func startUrge() {
-        if let draft, draft.hasStartedTimer {
-            step = draft.isTimerRunning(at: .now) ? .timer : .done
-        } else {
-            setDraft(draft ?? EmergencyDraft(startedAt: .now))
-            step = .steps
+    func open(_ route: AppRoute) {
+        switch route {
+        case .urge:
+            startUrge()
+        case .timer:
+            if draft?.hasStartedTimer == true {
+                startUrge()
+            }
+        case .morning:
+            present(.morning)
+        case .evening:
+            present(.evening)
+        case .trends:
+            close()
+            tab = .trends
         }
-        isPresented = true
     }
 
-    func startBackfill() {
-        step = .log(.backfill)
+    /// 首页大按钮。如果上一次还在计时，就回到计时；时间已到，就去结束页。
+    func startUrge() {
+        afterSaved = nil
+        if let draft, draft.hasStartedTimer {
+            present(draft.isTimerRunning(at: .now) ? .timer : .done)
+        } else {
+            setDraft(draft ?? EmergencyDraft(startedAt: .now))
+            present(.steps)
+        }
+    }
+
+    func startBackfill(preset: Date? = nil, returnTo: FlowStep? = nil) {
+        backfillPreset = preset
+        afterSaved = returnTo
+        if isPresented {
+            go(.log(.backfill))
+        } else {
+            present(.log(.backfill))
+        }
+    }
+
+    func present(_ newStep: FlowStep) {
+        step = newStep
         isPresented = true
     }
 
     /// 点了"时间到了"的通知。
     func resumeFromNotification() {
         guard let draft, draft.hasStartedTimer else { return }
-        step = draft.isTimerRunning(at: .now) ? .timer : .done
-        isPresented = true
+        present(draft.isTimerRunning(at: .now) ? .timer : .done)
     }
 
     // MARK: 计时
@@ -65,6 +102,7 @@ final class AppFlow {
         setDraft(current)
         go(.timer)
         scheduleEndNotification()
+        startActivity()
     }
 
     func extendTimer(minutes: Int) {
@@ -75,13 +113,33 @@ final class AppFlow {
         setDraft(current)
         go(.timer)
         scheduleEndNotification()
+        startActivity()
     }
 
     /// 冲动已经下去了，提前结束计时。
     func endTimerEarly() {
         Notifier.shared.cancel(id: draft?.notificationID)
         updateDraft { $0.notificationID = nil }
+        TimerActivity.endAll()
         go(.done)
+    }
+
+    /// 倒计时走完。
+    func timerFinished() {
+        TimerActivity.endAll()
+        go(.done)
+    }
+
+    private func startActivity() {
+        guard let started = draft?.timerStartedAt, let ends = draft?.timerEndsAt else { return }
+        TimerActivity.start(startedAt: started, endsAt: ends)
+    }
+
+    /// 回到前台时：没有进行中的计时，就收起锁屏上的倒计时。
+    func syncActivity() {
+        if draft?.isTimerRunning(at: .now) != true {
+            TimerActivity.endAll()
+        }
     }
 
     private func scheduleEndNotification() {
@@ -113,6 +171,7 @@ final class AppFlow {
 
     func clearDraft() {
         Notifier.shared.cancel(id: draft?.notificationID)
+        TimerActivity.endAll()
         setDraft(nil)
     }
 
@@ -124,8 +183,21 @@ final class AppFlow {
         }
     }
 
+    /// 记录完成后：回到来的地方，或者关掉流程。
+    func finishSaved() {
+        if let next = afterSaved {
+            afterSaved = nil
+            backfillPreset = nil
+            go(next)
+        } else {
+            close()
+        }
+    }
+
     /// 关掉全屏流程但保留草稿（例如"稍后再记"）。
     func close() {
+        backfillPreset = nil
+        afterSaved = nil
         withAnimation(.easeInOut(duration: 0.25)) {
             isPresented = false
         }

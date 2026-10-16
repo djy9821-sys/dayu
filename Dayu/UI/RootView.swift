@@ -12,11 +12,10 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var flow = AppFlow.shared
     @State private var lock = AppLock()
-    @State private var tab: AppTab = .today
 
     var body: some View {
         ZStack {
-            TabView(selection: $tab) {
+            TabView(selection: $flow.tab) {
                 TodayView()
                     .tabItem { Label("今天", systemImage: "sun.max") }
                     .tag(AppTab.today)
@@ -51,10 +50,21 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.2), value: lock.isLocked)
         .onChange(of: scenePhase) { _, newPhase in
             lock.handle(phase: newPhase)
+            if newPhase == .active {
+                Reminders.refresh()
+                flow.syncActivity()
+            }
+        }
+        .onOpenURL { url in
+            if let route = AppRoute(url: url) {
+                flow.open(route)
+            }
         }
         .onAppear {
+            Reminders.refresh()
+            flow.syncActivity()
             #if DEBUG
-            DemoMode.apply(flow: flow) { tab = $0 }
+            DemoMode.apply(flow: flow)
             #endif
         }
     }

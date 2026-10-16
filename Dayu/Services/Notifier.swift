@@ -5,8 +5,8 @@ import UserNotifications
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
 
-    private static let kindKey = "kind"
-    private static let timerEndKind = "timer_end"
+    static let kindKey = "kind"
+    static let timerEndKind = "timer_end"
 
     private var center: UNUserNotificationCenter { .current() }
 
@@ -15,12 +15,20 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.delegate = self
     }
 
-    /// 第一次开始计时时才请求权限，用户知道为什么需要它。
+    func authorizationStatus() async -> UNAuthorizationStatus {
+        await center.notificationSettings().authorizationStatus
+    }
+
+    /// 第一次需要时才请求权限，用户知道为什么需要它。
     func requestAuthorizationIfNeeded() async -> Bool {
         let settings = await center.notificationSettings()
         switch settings.authorizationStatus {
         case .notDetermined:
-            return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+            if granted {
+                await Reminders.refreshNow()
+            }
+            return granted
         case .authorized, .provisional, .ephemeral:
             return true
         default:
@@ -58,13 +66,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: UNUserNotificationCenterDelegate
 
-    /// App 在前台时不弹横幅：计时页自己会跳到结束页。
+    /// App 在前台时：计时结束不弹横幅（计时页自己会跳到结束页），其他提醒照常显示。
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([])
+        let kind = notification.request.content.userInfo[Self.kindKey] as? String
+        completionHandler(kind == Self.timerEndKind ? [] : [.banner, .list, .sound])
     }
 
     func userNotificationCenter(
@@ -73,9 +82,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let kind = response.notification.request.content.userInfo[Self.kindKey] as? String
-        if kind == Self.timerEndKind {
-            Task { @MainActor in
+        Task { @MainActor in
+            switch kind {
+            case Self.timerEndKind:
                 AppFlow.shared.resumeFromNotification()
+            case ReminderKind.night.rawValue:
+                AppFlow.shared.open(.evening)
+            case ReminderKind.morning.rawValue:
+                AppFlow.shared.open(.morning)
+            case ReminderKind.weekly.rawValue:
+                AppFlow.shared.open(.trends)
+            default:
+                break
             }
         }
         completionHandler()

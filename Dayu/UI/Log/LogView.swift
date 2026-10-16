@@ -24,7 +24,13 @@ struct LogView: View {
     var body: some View {
         VStack(spacing: 0) {
             FlowTopBar(leading: isBackfill ? "取消" : "稍后再记") {
-                flow.close()
+                if let back = flow.afterSaved {
+                    flow.afterSaved = nil
+                    flow.backfillPreset = nil
+                    flow.go(back)
+                } else {
+                    flow.close()
+                }
             }
             .padding(.horizontal, Theme.pagePadding)
 
@@ -150,6 +156,9 @@ struct LogView: View {
     private func prefill() {
         guard !didPrefill else { return }
         didPrefill = true
+        if isBackfill, let preset = flow.backfillPreset {
+            when = min(preset, .now)
+        }
         if !isBackfill, let draft = flow.draft {
             // 走完了计时：默认这次截断在第 0 步
             stage = .stimulus

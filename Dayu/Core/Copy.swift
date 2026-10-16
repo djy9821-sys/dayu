@@ -9,15 +9,23 @@ enum Copy {
 
     static let stepsHeadline = "换环境，而不是和欲望辩论。"
 
-    static let emergencySteps = [
-        "关掉正在看的东西",
-        "站起来",
-        "穿上鞋",
-        "离开房间",
-        "去大堂、咖啡厅，或者任何有人的地方",
-    ]
+    static func emergencySteps(solo: Bool = false) -> [String] {
+        [
+            "关掉正在看的东西",
+            "站起来",
+            "穿上鞋",
+            "离开房间",
+            solo ? soloStep : "去大堂、咖啡厅，或者任何有人的地方",
+        ]
+    }
 
-    static let stayInsideHint = "至少离开床，坐到门口或桌边。"
+    static let soloStep = "带上电脑或一本书，去大堂坐 20 分钟"
+
+    /// 出不了门时，计时页显示的替代动作。
+    static let inRoomAlternatives = ["20 个俯卧撑", "冷水洗脸", "站到窗边或走廊"]
+    static var stayInsideHint: String {
+        "至少离开床。也可以：" + inRoomAlternatives.joined(separator: " · ")
+    }
 
     /// 计时页轮播的句子。
     static func timerPrompts(minutes: Int, leftEnvironment: Bool) -> [String] {
@@ -41,8 +49,6 @@ enum Copy {
         let index = max(0, Int(elapsed / promptInterval)) % prompts.count
         return prompts[index]
     }
-
-    static let timerEndNotification = "时间到了。"
 
     /// 计时结束后，根据开始和结束时的冲动分数给一句话。
     static func doneMessage(start: Int?, end: Int?) -> String {
@@ -81,4 +87,63 @@ enum Copy {
 
     /// 补记的事件超过这么久，就不再弹止损页，只显示"记录完成"。
     static let stopPageWindow: TimeInterval = 3 * 3600
+
+    // MARK: 提醒（锁屏上别人能看到，必须中性）
+
+    static let timerEndNotification = "时间到了。"
+    static let nightReminder = "今天结束了。"
+    static let morningReminder = "早。先离开床。"
+    static let weeklyReminder = "看一眼这周。"
+    static let soloReminder = "去楼下坐 20 分钟？"
+
+    static var allNotificationTexts: [String] {
+        [timerEndNotification, nightReminder, morningReminder, weeklyReminder, soloReminder]
+    }
+
+    // MARK: 早上
+
+    static let morningTitle = "早。"
+    static let morningSubtitle = "先离开床，再看手机。"
+    static let morningDone = "好，开始今天"
+
+    // MARK: 晚上
+
+    static let eveningTitle = "今天结束了。"
+    static let nightLines = ["今天已经结束。", "不要解决人生。"]
+    static let nightChecks = ["手机放远，不带上床", "洗个澡", "关灯，睡觉"]
+    static let nightSoloLine = "今晚一个人。手机放在房间另一头，离床远一点。"
+    static let goodnight = "晚安"
+
+    // MARK: 运动和底盘
+
+    static let workoutLine = "我正在建设一个更强壮的身体。"
+    static let strengthNudge = "今天练一次力量，10 分钟也算。"
+    static let minimumNote = "状态不好时只做一点点，也算一次完整记录。"
+
+    // MARK: 独处模式
+
+    static let soloTitle = "今晚一个人住"
+    static let soloOff = "出差住酒店时打开。"
+    static let soloOn = "21:00 提醒你去楼下坐坐，收尾提醒提前 30 分钟。明早自动关闭。"
+
+    /// 所有会显示给用户的固定文案，用于检查禁用词。
+    static var allFixedTexts: [String] {
+        var texts: [String] = []
+        texts += emergencySteps()
+        texts += emergencySteps(solo: true)
+        texts += inRoomAlternatives
+        texts += stopNight
+        texts += stopDay
+        texts += nightLines
+        texts += nightChecks
+        texts += allNotificationTexts
+        let singles: [String] = [
+            stepsHeadline, soloStep, stayInsideHint, saved, stopTitle, stopSubtitle, pepNote,
+            stopButton(night: true), stopButton(night: false),
+            morningTitle, morningSubtitle, morningDone, eveningTitle, nightSoloLine, goodnight,
+            workoutLine, strengthNudge, minimumNote, soloTitle, soloOff, soloOn,
+        ]
+        texts += singles
+        return texts
+    }
 }

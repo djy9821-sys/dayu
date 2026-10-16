@@ -39,6 +39,9 @@ struct EventDetailView: View {
                 if let watch = event.watchMinutes {
                     row("大概看了", watch >= 90 ? "1 小时以上" : "\(watch) 分钟")
                 }
+                if let cut = event.cutStageRaw.flatMap(Stage.init(rawValue:)) {
+                    row("复盘：最早可以截断在", cut.cutLabel)
+                }
             }
             .listRowBackground(Theme.surface)
 

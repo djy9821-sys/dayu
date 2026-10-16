@@ -1,14 +1,17 @@
 import SwiftUI
 import SwiftData
 
-/// 趋势：过去 7 天的概览 + 全部记录。不用红色，没有连续天数。
+/// 趋势：过去 7 天的概览、底盘和全部记录。不用红色，没有连续天数。
 struct TrendsView: View {
     @Query(sort: \UrgeEvent.startedAt, order: .reverse) private var events: [UrgeEvent]
+    @Query private var logs: [DailyLog]
+    @Query private var workouts: [Workout]
     @AppStorage(SettingsKey.innerStages) private var innerStages = SettingsDefault.innerStages
 
     var body: some View {
         let boundaries = Boundaries(storage: innerStages)
         let summary = WeekSummary.make(from: events.map(\.snapshot), boundaries: boundaries, now: .now)
+        let base = BaseSummary.make(days: logs.map(\.snapshot), workouts: workouts.map(\.snapshot), today: DailyStore.todayKey)
 
         NavigationStack {
             List {
@@ -21,13 +24,13 @@ struct TrendsView: View {
                     if summary.total == 0 {
                         Text("还没有记录。下次冲动来的时候，按首页那个按钮。")
                     } else if let average = summary.averageStage {
-                        Text("平均截断在第 \(String(format: "%.1f", average)) 步（0 是刺激出现就停下）。这个数字往下走，就是河道在改。")
+                        Text("平均截断在第 \(String(format: "%.1f", average)) 步（0 是刚刷到就停下）。这个数字往下走，就是河道在改。")
                     }
                 }
                 .listRowBackground(Theme.surface)
 
                 if !summary.topTriggers.isEmpty {
-                    Section("最常见的触发") {
+                    Section {
                         ForEach(summary.topTriggers, id: \.trigger) { item in
                             HStack {
                                 Text(item.trigger.label)
@@ -46,17 +49,35 @@ struct TrendsView: View {
                             }
                             .padding(.vertical, 2)
                         }
+                    } header: {
+                        Text("最常见的触发")
                     }
                     .listRowBackground(Theme.surface)
                 }
 
+                Section {
+                    BaseRow(label: "平均睡眠", value: base.averageSleepMinutes.map(SleepMath.label) ?? "—")
+                    BaseRow(label: "力量训练", value: "\(base.strength) 次 / 目标 \(BaseSummary.strengthGoal)")
+                    BaseRow(label: "其他运动", value: "\(base.otherWorkouts) 次")
+                    BaseRow(label: "最重要的事完成", value: "\(base.mitDone) 天")
+                    BaseRow(label: "和真人交流", value: "\(base.connected) 天")
+                    BaseRow(label: "Night Mode", value: "\(base.nightMode) 天")
+                } header: {
+                    Text("底盘")
+                } footer: {
+                    Text("睡眠、运动、工作和真人连接垫高了，冲动就没那么容易接管。")
+                }
+                .listRowBackground(Theme.surface)
+
                 if !events.isEmpty {
-                    Section("全部记录") {
+                    Section {
                         ForEach(events) { event in
                             NavigationLink(value: event) {
                                 EventRow(event: event)
                             }
                         }
+                    } header: {
+                        Text("全部记录")
                     }
                     .listRowBackground(Theme.surface)
                 }
@@ -67,6 +88,21 @@ struct TrendsView: View {
             .navigationDestination(for: UrgeEvent.self) { event in
                 EventDetailView(event: event)
             }
+        }
+    }
+}
+
+private struct BaseRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundStyle(Theme.muted)
+                .monospacedDigit()
         }
     }
 }
@@ -124,6 +160,14 @@ struct EventRow: View {
                     Text("补记")
                         .font(.caption2)
                         .foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Theme.surfaceRaised, in: Capsule())
+                }
+                if event.reviewedAt != nil {
+                    Text("已复盘")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.river)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Theme.surfaceRaised, in: Capsule())

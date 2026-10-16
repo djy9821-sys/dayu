@@ -9,6 +9,7 @@ struct EventSnapshot: Equatable {
     var leftEnvironment: Bool
     var triggers: [Trigger]
     var place: Place?
+    var reviewed: Bool = false
 }
 
 /// 过去 7 天的概览。全部从记录里实时算出，不另外存储。

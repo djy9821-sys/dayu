@@ -44,6 +44,7 @@ struct TimerView: View {
                     Text(Copy.stayInsideHint)
                         .font(.footnote)
                         .foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
                         .padding(.top, 4)
                 }
 
@@ -76,7 +77,7 @@ struct TimerView: View {
             .padding(.horizontal, Theme.pagePadding)
             .onChange(of: remaining == 0, initial: true) { _, finished in
                 if finished, draft?.hasStartedTimer == true {
-                    flow.go(.done)
+                    flow.timerFinished()
                 }
             }
         }

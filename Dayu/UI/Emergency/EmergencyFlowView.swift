@@ -21,6 +21,14 @@ struct EmergencyFlowView: View {
                     StopView(stage: stage, night: night)
                 case .saved:
                     SavedView()
+                case .morning:
+                    MorningView()
+                case .evening:
+                    EveningView()
+                case .nightMode:
+                    NightModeView()
+                case .workout:
+                    WorkoutView()
                 }
             }
             .transition(.opacity)

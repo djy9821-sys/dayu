@@ -59,7 +59,7 @@ struct StopView: View {
             Spacer(minLength: 24)
 
             PrimaryButton(title: Copy.stopButton(night: night)) {
-                flow.close()
+                flow.finishSaved()
             }
             .padding(.bottom, 8)
         }
@@ -81,8 +81,8 @@ struct SavedView: View {
                 .font(.title2.weight(.semibold))
                 .padding(.top, 16)
             Spacer()
-            PrimaryButton(title: "回到生活") {
-                flow.close()
+            PrimaryButton(title: flow.afterSaved == nil ? "回到生活" : "继续") {
+                flow.finishSaved()
             }
             .padding(.bottom, 8)
         }

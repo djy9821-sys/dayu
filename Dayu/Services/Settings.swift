@@ -6,6 +6,15 @@ enum SettingsKey {
     static let innerStages = "innerStages"
     static let lockEnabled = "lockEnabled"
     static let emergencyDraft = "emergencyDraft"
+
+    static let bedMinutes = "bedMinutes"
+    static let wakeMinutes = "wakeMinutes"
+    static let nightLeadMinutes = "nightLeadMinutes"
+    static let reminderNight = "reminderNight"
+    static let reminderMorning = "reminderMorning"
+    static let reminderWeekly = "reminderWeekly"
+    /// 今晚独处模式的结束时间（timeIntervalSince1970），0 表示关闭
+    static let soloUntil = "soloUntil"
 }
 
 enum SettingsDefault {
@@ -13,16 +22,42 @@ enum SettingsDefault {
     static let innerStages = Boundaries.default.storage
     static let lockEnabled = true
     static let timerChoices = [10, 15, 20, 30]
+
+    static let bedMinutes = ReminderSettings.default.bed.minutes
+    static let wakeMinutes = ReminderSettings.default.wake.minutes
+    static let nightLeadMinutes = ReminderSettings.default.nightLeadMinutes
+    static let nightLeadChoices = [30, 45, 60]
 }
 
 enum AppSettings {
+    private static var defaults: UserDefaults { .standard }
+
     static var boundaries: Boundaries {
-        let stored = UserDefaults.standard.string(forKey: SettingsKey.innerStages)
-        return Boundaries(storage: stored ?? SettingsDefault.innerStages)
+        Boundaries(storage: defaults.string(forKey: SettingsKey.innerStages) ?? SettingsDefault.innerStages)
     }
 
     static var lockEnabled: Bool {
-        UserDefaults.standard.object(forKey: SettingsKey.lockEnabled) as? Bool ?? SettingsDefault.lockEnabled
+        defaults.object(forKey: SettingsKey.lockEnabled) as? Bool ?? SettingsDefault.lockEnabled
+    }
+
+    static var reminders: ReminderSettings {
+        ReminderSettings(
+            bed: TimeOfDay(minutes: defaults.object(forKey: SettingsKey.bedMinutes) as? Int ?? SettingsDefault.bedMinutes),
+            wake: TimeOfDay(minutes: defaults.object(forKey: SettingsKey.wakeMinutes) as? Int ?? SettingsDefault.wakeMinutes),
+            nightLeadMinutes: defaults.object(forKey: SettingsKey.nightLeadMinutes) as? Int ?? SettingsDefault.nightLeadMinutes,
+            nightOn: defaults.object(forKey: SettingsKey.reminderNight) as? Bool ?? true,
+            morningOn: defaults.object(forKey: SettingsKey.reminderMorning) as? Bool ?? true,
+            weeklyOn: defaults.object(forKey: SettingsKey.reminderWeekly) as? Bool ?? true
+        )
+    }
+
+    static var soloUntil: Date? {
+        let stored = defaults.double(forKey: SettingsKey.soloUntil)
+        return stored > 0 ? Date(timeIntervalSince1970: stored) : nil
+    }
+
+    static var isSoloActive: Bool {
+        (soloUntil ?? .distantPast) > .now
     }
 }
 

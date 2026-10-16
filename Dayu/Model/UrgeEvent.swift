@@ -81,7 +81,8 @@ final class UrgeEvent {
             stage: stage,
             leftEnvironment: leftEnvironment,
             triggers: triggers,
-            place: place
+            place: place,
+            reviewed: reviewedAt != nil
         )
     }
 

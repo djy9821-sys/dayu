@@ -1,43 +1,108 @@
 import SwiftUI
+import SwiftData
+import UserNotifications
 
-/// 首页：一个大按钮。没有天数，没有分数。
+/// 首页：一个大按钮，下面是今天的底盘。没有连续天数，没有分数。
 struct TodayView: View {
     @Environment(AppFlow.self) private var flow
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
+    @Query private var logs: [DailyLog]
+    @Query(sort: \Workout.createdAt, order: .reverse) private var workouts: [Workout]
+    @AppStorage(SettingsKey.soloUntil) private var soloUntil: Double = 0
+    @AppStorage(SettingsKey.wakeMinutes) private var wakeTarget = SettingsDefault.wakeMinutes
     @State private var pressCount = 0
+    @State private var notificationStatus: UNAuthorizationStatus?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(Self.dateTitle(.now))
-                .font(.subheadline)
-                .foregroundStyle(Theme.muted)
-                .padding(.top, 12)
-            Text("今天")
-                .font(.largeTitle.weight(.bold))
-                .padding(.top, 2)
+        let today = DailyStore.todayKey
+        let log = logs.first { $0.localDate == today }
+        let todaysWorkouts = workouts.filter { $0.localDate == today }
+        let lastStrength = workouts.first { $0.kind == .strength }?.localDate
+        let hour = Calendar.current.component(.hour, from: .now)
+        let solo = soloUntil > Date.now.timeIntervalSince1970
 
-            if let draft = flow.draft {
-                DraftBanner(draft: draft)
-                    .padding(.top, 20)
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(Self.dateTitle(.now))
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.muted)
+                    .padding(.top, 12)
+                Text("今天")
+                    .font(.largeTitle.weight(.bold))
+                    .padding(.top, 2)
 
-            Spacer(minLength: 24)
-
-            urgeButton
-
-            Spacer(minLength: 24)
-
-            HStack {
-                Spacer()
-                QuietButton(title: "补记一次") {
-                    flow.startBackfill()
+                if let draft = flow.draft {
+                    DraftBanner(draft: draft)
+                        .padding(.top, 20)
                 }
-                Spacer()
+
+                if notificationStatus == .notDetermined {
+                    NotificationCard {
+                        Task {
+                            _ = await Notifier.shared.requestAuthorizationIfNeeded()
+                            await loadStatus()
+                        }
+                    }
+                    .padding(.top, 16)
+                }
+
+                urgeButton
+                    .padding(.top, 24)
+
+                BaseGrid(
+                    log: log,
+                    workouts: todaysWorkouts,
+                    onSleep: { flow.open(.morning) },
+                    onWorkout: { flow.present(.workout) },
+                    onMit: { flow.open(.morning) },
+                    onConnect: { toggleConnected(today: today) }
+                )
+                .padding(.top, 16)
+
+                if Rhythm.shouldNudgeStrength(lastStrengthDate: lastStrength, today: today) {
+                    Text(Copy.strengthNudge)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.muted)
+                        .padding(.top, 10)
+                        .padding(.leading, 4)
+                }
+
+                SoloRow(isOn: Binding(
+                    get: { solo },
+                    set: { setSolo($0) }
+                ))
+                .padding(.top, 20)
+
+                HStack(spacing: 24) {
+                    Spacer()
+                    if hour >= 20 || hour < 5 {
+                        QuietButton(title: "进入 Night Mode") {
+                            flow.open(.evening)
+                        }
+                    }
+                    QuietButton(title: "补记一次") {
+                        flow.startBackfill()
+                    }
+                    Spacer()
+                }
+                .padding(.top, 16)
+                .padding(.bottom, 24)
             }
-            .padding(.bottom, 8)
+            .padding(.horizontal, Theme.pagePadding)
         }
-        .padding(.horizontal, Theme.pagePadding)
-        .pageBackground()
+        .scrollIndicators(.hidden)
+        .foregroundStyle(Theme.text)
+        .background(Theme.background.ignoresSafeArea())
         .sensoryFeedback(.impact(weight: .medium), trigger: pressCount)
+        .task {
+            await loadStatus()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await loadStatus() }
+            }
+        }
     }
 
     private var urgeButton: some View {
@@ -57,7 +122,7 @@ struct TodayView: View {
             }
             .foregroundStyle(Theme.onRiver)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 260)
+            .frame(height: 210)
             .padding(24)
             .background(
                 LinearGradient(
@@ -73,11 +138,145 @@ struct TodayView: View {
         .accessibilityHint("开始冲动应对流程")
     }
 
+    private func loadStatus() async {
+        notificationStatus = await Notifier.shared.authorizationStatus()
+    }
+
+    private func toggleConnected(today: String) {
+        let log = DailyStore.log(for: today, in: modelContext)
+        log.connected = !(log.connected ?? false)
+        log.updatedAt = .now
+        try? modelContext.save()
+    }
+
+    private func setSolo(_ on: Bool) {
+        if on {
+            let until = SoloMode.until(now: .now, calendar: .current, wake: TimeOfDay(minutes: wakeTarget))
+            soloUntil = until.timeIntervalSince1970
+        } else {
+            soloUntil = 0
+        }
+        Reminders.refresh()
+    }
+
     static func dateTitle(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日 EEEE"
         return formatter.string(from: date)
+    }
+}
+
+// MARK: 今日底盘
+
+private struct BaseGrid: View {
+    let log: DailyLog?
+    let workouts: [Workout]
+    let onSleep: () -> Void
+    let onWorkout: () -> Void
+    let onMit: () -> Void
+    let onConnect: () -> Void
+
+    var body: some View {
+        let sleep = log?.sleepMinutes
+        let mit = (log?.hasMit ?? false) ? (log?.mitText ?? "") : nil
+
+        Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+            GridRow {
+                BaseTile(icon: "bed.double", title: "睡眠",
+                         value: sleep.map(SleepMath.short) ?? "记一下",
+                         done: sleep != nil, action: onSleep)
+                BaseTile(icon: "figure.strengthtraining.traditional", title: "运动",
+                         value: workouts.isEmpty ? "记一次" : workouts.map(\.shortLabel).joined(separator: " · "),
+                         done: !workouts.isEmpty, action: onWorkout)
+            }
+            GridRow {
+                BaseTile(icon: "scope", title: "最重要的事",
+                         value: mit ?? "写一件",
+                         done: log?.mitDone == true, action: onMit)
+                BaseTile(icon: "person.2", title: "真人交流",
+                         value: log?.connected == true ? "有" : "点一下记录",
+                         done: log?.connected == true, action: onConnect)
+            }
+        }
+    }
+}
+
+private struct BaseTile: View {
+    let icon: String
+    let title: String
+    let value: String
+    let done: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.footnote)
+                    Text(title)
+                        .font(.footnote)
+                    Spacer(minLength: 0)
+                    if done {
+                        Image(systemName: "checkmark")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Theme.river)
+                    }
+                }
+                .foregroundStyle(Theme.muted)
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(done ? Theme.text : Theme.muted)
+                    .lineLimit(1)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(PressableStyle())
+    }
+}
+
+private struct SoloRow: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Copy.soloTitle)
+                    .font(.subheadline.weight(.semibold))
+                Text(isOn ? Copy.soloOn : Copy.soloOff)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .tint(Theme.river)
+        .padding(16)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
+    }
+}
+
+private struct NotificationCard: View {
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("开启提醒")
+                .font(.subheadline.weight(.semibold))
+            Text("每晚提醒你收尾，早上提醒你先离开床。锁屏上只显示中性的文字。")
+                .font(.footnote)
+                .foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("开启", action: action)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.river)
+                .padding(.top, 2)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.corner, style: .continuous))
     }
 }
 

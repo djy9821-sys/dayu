@@ -212,14 +212,11 @@ do {
 
     // 产品原则：任何文案里都不出现这些词
     let banned = ["失败", "破戒", "Day 0", "意志力", "坏人", "犯罪", "惩罚"]
-    let allCopy = Copy.emergencySteps
+    let allCopy = Copy.allFixedTexts
         + Copy.timerPrompts(minutes: 20, leftEnvironment: true)
         + Copy.timerPrompts(minutes: 20, leftEnvironment: false)
-        + Copy.stopNight + Copy.stopDay
-        + [Copy.stepsHeadline, Copy.stayInsideHint, Copy.timerEndNotification, Copy.saved,
-           Copy.stopTitle, Copy.stopSubtitle, Copy.pepNote,
-           Copy.stopButton(night: true), Copy.stopButton(night: false),
-           Copy.doneMessage(start: 8, end: 3), Copy.doneMessage(start: 3, end: 8), Copy.doneMessage(start: nil, end: nil)]
+        + [Copy.doneMessage(start: 8, end: 3), Copy.doneMessage(start: 3, end: 8), Copy.doneMessage(start: nil, end: nil)]
+    expect(allCopy.count > 50, "文案清单覆盖了所有固定文案")
     for text in allCopy {
         for word in banned {
             expect(!text.contains(word), "文案里出现了「\(word)」：\(text)")
@@ -227,10 +224,163 @@ do {
     }
 
     // 通知文案保持中性：锁屏上看不出用途
-    let sensitive = ["色", "冲动", "性", "porn"]
-    for word in sensitive {
-        expect(!Copy.timerEndNotification.contains(word), "通知文案里出现敏感词：\(word)")
+    let sensitive = ["色", "冲动", "性", "porn", "自慰", "戒", "失控"]
+    for text in Copy.allNotificationTexts {
+        for word in sensitive {
+            expect(!text.contains(word), "通知文案里出现敏感词「\(word)」：\(text)")
+        }
     }
+
+    expectEqual(Copy.emergencySteps().count, 5, "五个步骤")
+    expectEqual(Copy.emergencySteps(solo: true).last, Copy.soloStep, "独处模式换成酒店版最后一步")
+    expect(Copy.stayInsideHint.contains("俯卧撑"), "出不了门时给出替代动作")
+}
+
+// MARK: TimeOfDay / SleepMath
+
+do {
+    let bed = TimeOfDay(hour: 23, minute: 30)
+    expectEqual(bed.minutes, 1410, "23:30 的分钟数")
+    expectEqual(bed.label, "23:30", "钟点显示")
+    expectEqual(bed.adding(minutes: -45).label, "22:45", "提前 45 分钟")
+    expectEqual(TimeOfDay(hour: 0, minute: 15).adding(minutes: -45).label, "23:30", "跨午夜往前")
+    expectEqual(TimeOfDay(minutes: 1500).label, "01:00", "超过一天取余")
+    expectEqual(TimeOfDay(minutes: -30).label, "23:30", "负数取余")
+
+    let wake = TimeOfDay(hour: 7, minute: 0)
+    expectEqual(SleepMath.minutes(bed: bed, wake: wake), 450, "23:30 到 7:00 是 7.5 小时")
+    expectEqual(SleepMath.minutes(bed: TimeOfDay(hour: 1, minute: 10), wake: wake), 350, "凌晨入睡")
+    expectEqual(SleepMath.label(450), "7 小时 30 分", "睡眠显示")
+    expectEqual(SleepMath.label(420), "7 小时", "整小时")
+    expectEqual(SleepMath.label(40), "40 分钟", "不到一小时")
+    expectEqual(SleepMath.short(450), "7h30", "短写法")
+    expectEqual(SleepMath.short(485), "8h05", "短写法补零")
+
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Ho_Chi_Minh")!
+    let day = utc("2026-10-16T05:00:00Z") // 越南 12:00
+    expectEqual(LocalTime.display(bed.date(on: day, calendar: calendar), offsetMinutes: vietnam, format: "yyyy-MM-dd HH:mm"),
+                "2026-10-16 23:30", "某天的某个钟点")
+    expectEqual(TimeOfDay(date: utc("2026-10-16T16:40:00Z"), calendar: calendar).label, "23:40", "从时刻取出钟点")
+    expectEqual("  去大堂  \n".trimmed, "去大堂", "去掉首尾空白")
+}
+
+// MARK: LocalTime 日期
+
+do {
+    expectEqual(LocalTime.daysBetween("2026-10-13", "2026-10-16"), 3, "相差 3 天")
+    expectEqual(LocalTime.daysBetween("2026-09-30", "2026-10-01"), 1, "跨月")
+    expectEqual(LocalTime.daysBetween("bad", "2026-10-01"), nil, "无效日期")
+    expectEqual(LocalTime.recentDates(endingAt: "2026-10-02", count: 3), ["2026-10-02", "2026-10-01", "2026-09-30"], "往前数 3 天")
+    expectEqual(LocalTime.recentDates(endingAt: "2026-10-16", count: 7).count, 7, "7 天")
+}
+
+// MARK: ReminderPlan
+
+do {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Ho_Chi_Minh")!
+    // 2026-10-16 是周五；越南 20:00 = UTC 13:00
+    let now = utc("2026-10-16T13:00:00Z")
+    let settings = ReminderSettings.default
+    expectEqual(settings.nightTime.label, "22:45", "默认收尾提醒 22:45")
+    expectEqual(settings.morningTime.label, "07:15", "默认晨间提醒 7:15")
+
+    func local(_ date: Date) -> String {
+        LocalTime.display(date, offsetMinutes: vietnam, format: "MM-dd HH:mm")
+    }
+
+    let items = ReminderPlan.make(now: now, calendar: calendar, settings: settings, soloUntil: nil)
+    expectEqual(items.filter { $0.kind == .night }.count, 7, "7 个收尾提醒（今晚还没到）")
+    expectEqual(items.filter { $0.kind == .morning }.count, 6, "6 个晨间提醒（今早已过）")
+    expectEqual(items.filter { $0.kind == .weekly }.count, 1, "7 天里一个周日")
+    expectEqual(items.filter { $0.kind == .solo }.count, 0, "没开独处模式")
+    expectEqual(items.first.map { local($0.fireDate) }, "10-16 22:45", "第一个是今晚收尾")
+    expectEqual(ReminderPlan.next(.morning, in: items).map { local($0.fireDate) }, "10-17 07:15", "下一个晨间提醒")
+    expectEqual(ReminderPlan.next(.weekly, in: items).map { local($0.fireDate) }, "10-18 20:00", "周日 20:00 回顾")
+    expect(items.allSatisfy { $0.id.hasPrefix(ReminderPlan.idPrefix) }, "提醒编号统一前缀")
+    expectEqual(Set(items.map(\.id)).count, items.count, "提醒编号不重复")
+    expect(zip(items, items.dropFirst()).allSatisfy { $0.fireDate <= $1.fireDate }, "按时间排序")
+
+    // 独处模式：今晚 21:00 去楼下坐坐，收尾提前 30 分钟；明早结束
+    let until = SoloMode.until(now: now, calendar: calendar, wake: settings.wake)
+    expectEqual(local(until), "10-17 07:00", "独处模式到明早起床")
+    let solo = ReminderPlan.make(now: now, calendar: calendar, settings: settings, soloUntil: until)
+    let soloItems = solo.filter { $0.kind == .solo }
+    expectEqual(soloItems.count, 1, "只有今晚一个 21:00 提醒")
+    expectEqual(soloItems.first.map { local($0.fireDate) }, "10-16 21:00", "今晚 21:00")
+    let nights = solo.filter { $0.kind == .night }.map { local($0.fireDate) }
+    expectEqual(nights.first, "10-16 22:15", "今晚收尾提前到 22:15")
+    expectEqual(nights.dropFirst().first, "10-17 22:45", "明晚恢复正常")
+
+    // 22:30 打开独处模式：21:00 已过，提前后的 22:15 也已过
+    let late = utc("2026-10-16T15:30:00Z")
+    let lateItems = ReminderPlan.make(now: late, calendar: calendar, settings: settings,
+                                      soloUntil: SoloMode.until(now: late, calendar: calendar, wake: settings.wake))
+    expectEqual(lateItems.filter { $0.kind == .solo }.count, 0, "21:00 已过")
+    expectEqual(lateItems.first { $0.kind == .night }.map { local($0.fireDate) }, "10-17 22:45", "今晚的收尾已过，下一个是明晚")
+
+    // 凌晨 1 点：独处模式到今早 7:00
+    let small = utc("2026-10-16T18:00:00Z") // 越南 10-17 01:00
+    expectEqual(local(SoloMode.until(now: small, calendar: calendar, wake: settings.wake)), "10-17 07:00", "凌晨打开到当天早上")
+
+    // 全部关掉
+    var off = settings
+    off.nightOn = false
+    off.morningOn = false
+    off.weeklyOn = false
+    expectEqual(ReminderPlan.make(now: now, calendar: calendar, settings: off, soloUntil: nil).count, 0, "全部关闭没有提醒")
+
+    // 补记默认时间
+    let morning = utc("2026-10-17T00:30:00Z") // 越南 07:30
+    expectEqual(local(BackfillDefault.date(now: morning, calendar: calendar)), "10-16 23:00", "早上补记默认昨晚 23:00")
+    expectEqual(BackfillDefault.date(now: now, calendar: calendar), now, "晚上补记默认现在")
+}
+
+// MARK: BaseSummary / Rhythm / ReviewQueue
+
+do {
+    let days = [
+        DaySnapshot(localDate: "2026-10-16", sleepMinutes: 420, mitText: "报价", mitDone: true, connected: true, nightModeDone: true),
+        DaySnapshot(localDate: "2026-10-15", sleepMinutes: 360, mitText: nil, mitDone: nil, connected: false, nightModeDone: false),
+        DaySnapshot(localDate: "2026-10-14", sleepMinutes: nil, mitText: "客户", mitDone: false, connected: true, nightModeDone: true),
+        DaySnapshot(localDate: "2026-10-01", sleepMinutes: 600, mitText: nil, mitDone: true, connected: true, nightModeDone: true),
+    ]
+    let workouts = [
+        WorkoutSnapshot(localDate: "2026-10-16", type: .strength, minutes: 30),
+        WorkoutSnapshot(localDate: "2026-10-13", type: .strength, minutes: 10),
+        WorkoutSnapshot(localDate: "2026-10-12", type: .walk, minutes: 40),
+        WorkoutSnapshot(localDate: "2026-10-02", type: .strength, minutes: 30),
+    ]
+    let base = BaseSummary.make(days: days, workouts: workouts, today: "2026-10-16")
+    expectEqual(base.averageSleepMinutes, 390, "平均睡眠只算 7 天内有记录的")
+    expectEqual(base.sleepDays, 2, "两天有睡眠记录")
+    expectEqual(base.strength, 2, "7 天内两次力量")
+    expectEqual(base.otherWorkouts, 1, "一次走路")
+    expectEqual(base.mitDone, 1, "最重要的事完成一天")
+    expectEqual(base.connected, 2, "真人交流两天")
+    expectEqual(base.nightMode, 2, "Night Mode 两天")
+    expectEqual(BaseSummary.make(days: [], workouts: [], today: "2026-10-16").averageSleepMinutes, nil, "没有记录")
+
+    expect(Rhythm.shouldNudgeStrength(lastStrengthDate: nil, today: "2026-10-16"), "从没练过：提醒")
+    expect(Rhythm.shouldNudgeStrength(lastStrengthDate: "2026-10-13", today: "2026-10-16"), "隔了 3 天：提醒")
+    expect(!Rhythm.shouldNudgeStrength(lastStrengthDate: "2026-10-14", today: "2026-10-16"), "隔了 2 天：不提醒")
+    expect(!Rhythm.shouldNudgeStrength(lastStrengthDate: "2026-10-16", today: "2026-10-16"), "今天练了：不提醒")
+
+    let now = utc("2026-10-17T00:30:00Z")
+    let lastNight = EventSnapshot(startedAt: utc("2026-10-16T16:20:00Z"), tzOffsetMinutes: vietnam, source: .backfill,
+                                  stage: .watched, leftEnvironment: false, triggers: [.alone, .instagram, .bored], place: .hotel)
+    expect(ReviewQueue.needsReview(lastNight, boundaries: .default, now: now), "昨晚走进内圈：需要复盘")
+    var reviewed = lastNight
+    reviewed.reviewed = true
+    expect(!ReviewQueue.needsReview(reviewed, boundaries: .default, now: now), "复盘过的不再出现")
+    var mild = lastNight
+    mild.stage = .masturbated
+    expect(!ReviewQueue.needsReview(mild, boundaries: .default, now: now), "不在内圈不需要复盘")
+    expect(!ReviewQueue.needsReview(lastNight, boundaries: .default, now: now.addingTimeInterval(3 * 86_400)), "太久以前的不再出现")
+    expectEqual(ReviewQueue.condition(for: lastNight), "深夜 · 酒店 · 独处、Instagram", "预案条件最多两个触发")
+    expectEqual(ReviewQueue.cutOptions(for: .watched), [.stimulus, .searched], "截断点只能比这次更早")
+    expectEqual(ReviewQueue.cutOptions(for: .stimulus), [], "第 0 步没有更早的截断点")
 }
 
 // MARK: Vocabulary

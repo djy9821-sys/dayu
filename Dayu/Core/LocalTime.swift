@@ -27,6 +27,37 @@ enum LocalTime {
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
 
+    /// 当地日期，按给定日历（通常是手机当前的日历）。
+    static func dateString(_ date: Date, calendar: Calendar) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    /// 把 "YYYY-MM-DD" 解析成那一天（按 UTC 计算，只用来算日期差）。
+    static func parseDate(_ string: String) -> Date? {
+        let parts = string.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return utcCalendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    }
+
+    /// 两个当地日期之间相差几天。
+    static func daysBetween(_ from: String, _ to: String) -> Int? {
+        guard let start = parseDate(from), let end = parseDate(to) else { return nil }
+        return utcCalendar.dateComponents([.day], from: start, to: end).day
+    }
+
+    /// 以某天为最后一天，往前数 count 天（含当天）。
+    static func recentDates(endingAt today: String, count: Int) -> [String] {
+        guard let end = parseDate(today) else { return [today] }
+        return (0..<max(0, count)).compactMap { offset in
+            utcCalendar.date(byAdding: .day, value: -offset, to: end).map { dateString($0, offsetMinutes: 0) }
+        }
+    }
+
+    private static var utcCalendar: Calendar {
+        calendar(offsetMinutes: 0)
+    }
+
     static func hour(_ date: Date, offsetMinutes: Int) -> Int {
         calendar(offsetMinutes: offsetMinutes).component(.hour, from: date)
     }
