@@ -1,0 +1,82 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode version
+        run: xcodebuild -version
+
+      - name: Core logic checks
+        run: |
+          swiftc Dayu/Core/*.swift Tests/CoreChecks/main.swift -o corechecks
+          ./corechecks
+
+      - name: Build for simulator (Debug)
+        run: |
+          set -o pipefail
+          xcodebuild -project Dayu.xcodeproj -target Dayu -configuration Debug \
+            -sdk iphonesimulator ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            SYMROOT="$PWD/build" CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build-debug.log | grep -E "error:|warning:|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/Debug-iphonesimulator/Dayu.app
+
+      - name: Build for device (Release, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project Dayu.xcodeproj -target Dayu -configuration Release \
+            -sdk iphoneos SYMROOT="$PWD/build" CODE_SIGNING_ALLOWED=NO build 2>&1 | tee build-release.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          test -d build/Release-iphoneos/Dayu.app
+
+      - name: Screenshots
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          devices = json.load(sys.stdin)['devices']
+          pool = [(rt, d) for rt, ds in devices.items() if 'iOS' in rt for d in ds if d['name'].startswith('iPhone')]
+          preferred = [p for p in pool if 'Pro' in p[1]['name'] and 'Max' not in p[1]['name']] or pool
+          preferred.sort(key=lambda p: p[0])
+          print(preferred[-1][1]['udid'])
+          ")
+          echo "Simulator: $UDID"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl ui "$UDID" appearance dark
+          xcrun simctl status_bar "$UDID" override --time "21:41" --batteryState charged --batteryLevel 100 || true
+          xcrun simctl install "$UDID" build/Debug-iphonesimulator/Dayu.app
+          mkdir -p shots
+          for s in today today-timer steps timer done log backfill stop stop-services saved trends me; do
+            xcrun simctl launch --terminate-running-process "$UDID" com.djy9821.dayu -uiDemo "$s"
+            sleep 6
+            xcrun simctl io "$UDID" screenshot "shots/$s.png"
+          done
+          xcrun simctl launch --terminate-running-process "$UDID" com.djy9821.dayu
+          sleep 6
+          xcrun simctl io "$UDID" screenshot "shots/real-launch.png"
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: shots/
+          if-no-files-found: ignore
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: build-*.log
+          if-no-files-found: ignore

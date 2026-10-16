@@ -1,0 +1,14 @@
+# Xcode
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# 本地检查产物
+corechecks
+shots/
+*.log
+
+# macOS
+.DS_Store
